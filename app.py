@@ -274,6 +274,52 @@ with tab_scan:
             st.info("Aucun QR détecté pour l'instant. Approchez un QR net et bien éclairé à ~15-25 cm.")
     st.subheader("Ou importer une image de QR")
 
+    st.subheader("Mode photo (recommandé)")
+    st.caption("Utilisez l'appareil photo pour capturer une image nette du QR (très fiable).")
+    img_cam = st.camera_input("Cadrez le QR puis prenez la photo")
+    if img_cam is not None:
+        data = img_cam.getvalue()
+        from modules.qr import decode_qr_from_bytes, parse_contact_from_qr
+        qr_text2 = decode_qr_from_bytes(data)
+        if qr_text2:
+            st.success("QR détecté ✔ (mode photo)")
+            with st.expander("Voir le contenu brut du QR (photo)"):
+                st.code(qr_text2, language="text")
+            parsed2 = parse_contact_from_qr(qr_text2)
+            with st.form("photo_to_lead", clear_on_submit=False):
+                c1, c2 = st.columns(2)
+                with c1:
+                    p_first = st.text_input("Prénom *", value=parsed2.get("first_name",""))
+                with c2:
+                    p_last = st.text_input("Nom *", value=parsed2.get("last_name",""))
+                c3, c4 = st.columns(2)
+                with c3:
+                    p_email = st.text_input("Email *", value=parsed2.get("email",""))
+                with c4:
+                    p_phone = st.text_input("Téléphone", value=parsed2.get("phone",""))
+                p_company = st.text_input("Société *", value=parsed2.get("company",""))
+                p_job = st.text_input("Poste", value=parsed2.get("job",""))
+                p_interest = st.selectbox("Intérêt", ["Prise de contact","Démo","Devis","Partenariat","Autre"])
+                p_consent = st.checkbox("J’accepte d’être recontacté·e (RGPD)", value=True)
+                p_submit = st.form_submit_button("Enregistrer le lead")
+            if p_submit:
+                if not (p_first and p_last and p_email and p_company and p_consent):
+                    st.error("Champs obligatoires manquants ou consentement non coché.")
+                else:
+                    lead = Lead(first_name=p_first.strip(), last_name=p_last.strip(),
+                                email=p_email.strip(), phone=p_phone.strip(),
+                                company=p_company.strip(), job=p_job.strip(),
+                                interest=p_interest, utm_source="qr-photo",
+                                ip_hash=get_client_ip_hash())
+                    ok, msg = storage.save_lead(lead)
+                    if ok:
+                        st.success("✅ Lead enregistré depuis photo.")
+                    else:
+                        st.error(f"Erreur: {msg}")
+        else:
+            st.error("Impossible de lire un QR dans cette photo. Reprenez avec plus de lumière et sans reflet.")
+
+
     img = st.file_uploader("Photo du QR (PNG/JPG)", type=["png","jpg","jpeg"])
     if img is not None:
         from modules.qr import decode_qr_from_bytes
