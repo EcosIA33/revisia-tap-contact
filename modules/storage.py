@@ -1,72 +1,115 @@
-# -*- coding: utf-8 -*-
+
+"""
+Persistent storage for leads using SQLite (stdlib only).
+
+- Database file: data/leads.db (override with env LEADS_DB_PATH)
+- Safe to import multiple times; keeps a single connection.
+- Provides upsert, list, delete, and CSV export helpers.
+"""
+
 from __future__ import annotations
-import csv
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Optional, Tuple
-from filelock import FileLock
+import os, sqlite3, datetime, csv, io, threading
 
-try:
-    import gspread
-    from oauth2client.service_account import ServiceAccountCredentials
-except Exception:  # pragma: no cover
-    gspread = None
-    ServiceAccountCredentials = None  # type: ignore
+DB_PATH = os.getenv("LEADS_DB_PATH", "data/leads.db")
+_CONN = None
+_LOCK = threading.RLock()
 
-@dataclass
-class Lead:
-    first_name: str
-    last_name: str
-    email: str
-    phone: str
-    company: str
-    job: str
-    interest: str
-    utm_source: str
-    ip_hash: str
 
-@dataclass
-class StorageConfig:
-    csv_path: Path
-    gsheet_id: Optional[str] = None
-    gservice_json: Optional[str] = None
+def _connect(db_path: str) -> sqlite3.Connection:
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    con = sqlite3.connect(db_path, check_same_thread=False)
+    con.execute("""
+    CREATE TABLE IF NOT EXISTS leads (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        first_name TEXT,
+        last_name  TEXT,
+        email      TEXT UNIQUE,
+        phone      TEXT,
+        company    TEXT,
+        job        TEXT,
+        source     TEXT,
+        consent    INTEGER DEFAULT 0,
+        created_at TEXT,
+        updated_at TEXT
+    )
+    """)
+    con.execute("CREATE INDEX IF NOT EXISTS idx_leads_email ON leads(email)")
+    return con
 
-class Storage:
-    def __init__(self, cfg: StorageConfig) -> None:
-        self.cfg = cfg
-        self.cfg.csv_path.parent.mkdir(parents=True, exist_ok=True)
-        if not self.cfg.csv_path.exists():
-            with open(self.cfg.csv_path, "w", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerow([
-                    "first_name","last_name","email","phone","company",
-                    "job","interest","utm_source","ip_hash"
-                ])
 
-    def save_lead(self, lead: Lead) -> Tuple[bool, str]:
-        try:
-            lock = FileLock(str(self.cfg.csv_path) + ".lock")
-            with lock:
-                with open(self.cfg.csv_path, "a", newline="", encoding="utf-8") as f:
-                    writer = csv.writer(f)
-                    writer.writerow([
-                        lead.first_name, lead.last_name, lead.email, lead.phone,
-                        lead.company, lead.job, lead.interest, lead.utm_source, lead.ip_hash
-                    ])
-        except Exception as e:
-            return False, f"CSV error: {e}"
+def init_db(path: str | None = None) -> str:
+    """Initialize (or reuse) the SQLite DB. Returns DB path."""
+    global DB_PATH, _CONN
+    with _LOCK:
+        if path:
+            DB_PATH = path
+        if _CONN is None:
+            _CONN = _connect(DB_PATH)
+        return DB_PATH
 
-        if self.cfg.gsheet_id and self.cfg.gservice_json and gspread and ServiceAccountCredentials:
-            try:
-                scope = ["https://spreadsheets.google.com/feeds",
-                         "https://www.googleapis.com/auth/drive"]
-                creds = ServiceAccountCredentials.from_json_keyfile_name(self.cfg.gservice_json, scope)
-                client = gspread.authorize(creds)
-                sheet = client.open_by_key(self.cfg.gsheet_id).sheet1
-                sheet.append_row([
-                    lead.first_name, lead.last_name, lead.email, lead.phone,
-                    lead.company, lead.job, lead.interest, lead.utm_source, lead.ip_hash
-                ])
-            except Exception as e:
-                return True, f"Lead enregistré (CSV). Google Sheets: {e}"
-        return True, "OK"
+
+def _now_iso() -> str:
+    return datetime.datetime.utcnow().isoformat(timespec="seconds") + "Z"
+
+
+def upsert_lead(first_name: str, last_name: str, email: str, phone: str,
+                company: str, job: str, source: str, consent: bool) -> None:
+    """Insert or update a lead by unique email."""
+    if not email:
+        raise ValueError("email is required for persistence (unique key)")
+    now = _now_iso()
+    with _LOCK, _CONN:
+        _CONN.execute(
+            """
+            INSERT INTO leads (first_name,last_name,email,phone,company,job,source,consent,created_at,updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(email) DO UPDATE SET
+              first_name=excluded.first_name,
+              last_name=excluded.last_name,
+              phone=excluded.phone,
+              company=excluded.company,
+              job=excluded.job,
+              source=excluded.source,
+              consent=excluded.consent,
+              updated_at=excluded.updated_at
+            """,
+            (first_name or "", last_name or "", email.strip().lower(), phone or "",
+             company or "", job or "", source or "", int(bool(consent)), now, now)
+        )
+
+
+def list_leads(order: str = "updated_at DESC") -> list[dict]:
+    with _LOCK:
+        cur = _CONN.execute(f"SELECT id, first_name,last_name,email,phone,company,job,source,consent,created_at,updated_at FROM leads ORDER BY {order}")
+        cols = [c[0] for c in cur.description]
+        return [dict(zip(cols, row)) for row in cur.fetchall()]
+
+
+def delete_lead(lead_id: int) -> None:
+    with _LOCK, _CONN:
+        _CONN.execute("DELETE FROM leads WHERE id=?", (int(lead_id),))
+
+
+def export_csv_to_path(path: str) -> str:
+    """Write current leads to CSV file at `path` and return the path."""
+    rows = list_leads()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    headers = ["id","first_name","last_name","email","phone","company","job","source","consent","created_at","updated_at"]
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=headers)
+        w.writeheader()
+        for r in rows:
+            w.writerow({k: r.get(k, "") for k in headers})
+    return path
+
+
+def export_csv_bytes() -> bytes:
+    """Return CSV export as bytes (for Streamlit download_button)."""
+    rows = list_leads()
+    headers = ["id","first_name","last_name","email","phone","company","job","source","consent","created_at","updated_at"]
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=headers)
+    w.writeheader()
+    for r in rows:
+        w.writerow({k: r.get(k, "") for k in headers})
+    return buf.getvalue().encode("utf-8")
