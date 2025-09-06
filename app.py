@@ -60,6 +60,8 @@ SHOW_QR_IN_HEADER = os.getenv("SHOW_QR_IN_HEADER", "true").lower() in ("1","true
 QR_IMAGE_PATH = os.getenv("QR_IMAGE_PATH", "assets/qr.png")
 QR_TARGET_URL = os.getenv("QR_TARGET_URL", "")  # si défini, on génère le QR dynamiquement
 SHOW_DOWNLOAD_BUTTON = os.getenv("SHOW_DOWNLOAD_BUTTON", "false").lower() in ("1","true","yes","on")
+LOGO_PATH = os.getenv("LOGO_PATH", "assets/logo.png")
+SHOW_LOGO = os.getenv("SHOW_LOGO", "true").lower() in ("1","true","yes","on")
 
 # --- Storage ---
 storage_cfg = StorageConfig(
@@ -70,6 +72,12 @@ storage_cfg = StorageConfig(
 storage = Storage(storage_cfg)
 
 st.set_page_config(page_title=APP_NAME, page_icon="🎯", layout="centered")
+
+# -- LOGO --
+if SHOW_LOGO:
+    _logo_bytes = load_image_bytes(LOGO_PATH)
+    if _logo_bytes:
+        st.image(_logo_bytes, width=160)
 
 tab_share, tab_scan, tab_export = st.tabs(["📇 Partager ma carte", "📷 Scanner un QR", "📤 Export"])
 
