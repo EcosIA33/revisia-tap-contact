@@ -32,14 +32,14 @@ LEADS_CSV = Path(os.getenv("LEADS_CSV", DATA_DIR / "leads.csv"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 IDENTITY: Dict[str,str] = {
-    "FN": os.getenv("FN", "Prenom Nom"),
-    "N_LAST": os.getenv("N_LAST", "Nom"),
-    "N_FIRST": os.getenv("N_FIRST", "Prenom"),
-    "ORG": os.getenv("ORG", "Votre Société"),
-    "TITLE": os.getenv("TITLE", "Fonction"),
-    "TEL": os.getenv("TEL", "+33 6 00 00 00 00"),
-    "EMAIL": os.getenv("EMAIL", "vous@example.com"),
-    "URL": os.getenv("URL", "https://www.exemple.com"),
+    "FN": os.getenv("FN", "Adrian Rodriguez"),
+    "N_LAST": os.getenv("N_LAST", "Rodriguez"),
+    "N_FIRST": os.getenv("N_FIRST", "Adrian"),
+    "ORG": os.getenv("ORG", "DRIVN"),
+    "TITLE": os.getenv("TITLE", "Fondateur"),
+    "TEL": os.getenv("TEL", "+33 6 27 16 52 05"),
+    "EMAIL": os.getenv("EMAIL", "adrian@drivn.fr"),
+    "URL": os.getenv("URL", "https://www.drivn.fr/"),
     "ADR_STREET": os.getenv("ADR_STREET", ""),
     "ADR_CITY": os.getenv("ADR_CITY", ""),
     "ADR_PC": os.getenv("ADR_PC", ""),
