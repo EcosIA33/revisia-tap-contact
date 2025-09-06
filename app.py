@@ -170,111 +170,14 @@ with tab_share:
                 st.error(f"Erreur: {msg}")
 
 with tab_scan:
-    st.header("Scanner un QR visiteur")
-    st.caption("La caméra arrière est utilisée par défaut. Si besoin, changez de caméra dans le menu du navigateur.")
-    if not QR_ENABLED:
-        st.warning("Scanner live indisponible : installez 'streamlit-webrtc', 'opencv-python(-headless)', 'av', 'aiortc', 'numpy'.")
-    else:
-        import cv2  # type: ignore
-        from streamlit_webrtc import webrtc_streamer, WebRtcMode, VideoProcessorBase, RTCConfiguration
+    st.header("Scanner un QR (depuis une image)")
+    AUTO_SAVE_ON_DECODE = os.getenv('AUTO_SAVE_ON_DECODE','0').lower() in ('1','true','yes','on')
+    if "qr_last" not in st.session_state:
+        st.session_state.qr_last = None
+    auto_save = st.checkbox("Auto-enregistrer dès qu'un QR valide est détecté", value=AUTO_SAVE_ON_DECODE)
 
-        class QRProcessor(VideoProcessorBase):  # type: ignore[misc]
-            def __init__(self) -> None:
-                self.detector = cv2.QRCodeDetector()
-                self.last_result: Optional[str] = None
-            def transform(self, frame):
-                img = frame.to_ndarray(format="bgr24")
-                try:
-                    from modules.qr import decode_qr_from_ndarray
-                    data = decode_qr_from_ndarray(img)
-                    if data:
-                        self.last_result = data
-                except Exception:
-                    pass
-                return img
-
-        ctx = webrtc_streamer(
-            key="qr-scan",
-            mode=WebRtcMode.SENDRECV,
-            rtc_configuration=RTC_CONFIGURATION,
-            media_stream_constraints={
-                "video": {"facingMode": {"ideal": "environment"}, "width": {"ideal": 1280}, "height": {"ideal": 720}},
-                "audio": False
-            },
-            video_processor_factory=QRProcessor,
-            async_processing=True,
-        )
-
-        
-        AUTO_SAVE_ON_DECODE = os.getenv('AUTO_SAVE_ON_DECODE','0').lower() in ('1','true','yes','on')
-        if "qr_last" not in st.session_state:
-            st.session_state.qr_last = None
-        auto_save = st.checkbox("Auto-enregistrer dès qu'un QR valide est détecté", value=AUTO_SAVE_ON_DECODE)
-
-        qr_text = ctx.video_processor.last_result if ctx and ctx.video_processor else None
-        if qr_text:
-            # Afficher le brut pour debug
-            with st.expander("Voir le contenu brut du QR détecté"):
-                st.code(qr_text, language="text")
-
-            from modules.qr import parse_contact_from_qr
-            parsed = parse_contact_from_qr(qr_text)
-            st.write("Champs reconnus :", parsed)
-
-            # Prévient les doublons
-            is_new = (qr_text != st.session_state.qr_last)
-            if is_new:
-                st.session_state.qr_last = qr_text
-
-            # Formulaire + enregistrement
-            with st.form("scan_to_lead", clear_on_submit=False):
-                c1, c2 = st.columns(2)
-                with c1:
-                    s_first = st.text_input("Prénom *", value=parsed.get("first_name",""))
-                with c2:
-                    s_last = st.text_input("Nom *", value=parsed.get("last_name",""))
-                c3, c4 = st.columns(2)
-                with c3:
-                    s_email = st.text_input("Email *", value=parsed.get("email",""))
-                with c4:
-                    s_phone = st.text_input("Téléphone", value=parsed.get("phone",""))
-                s_company = st.text_input("Société *", value=parsed.get("company",""))
-                s_job = st.text_input("Poste", value=parsed.get("job",""))
-                s_interest = st.selectbox("Intérêt", ["Prise de contact","Démo","Devis","Partenariat","Autre"])
-                s_consent = st.checkbox("J’accepte d’être recontacté·e (RGPD)", value=True)
-                s_submit = st.form_submit_button("Enregistrer le lead")
-
-            def _save_lead(first, last, email, phone, company, job, interest, consent):
-                if not (first and last and email and company and consent):
-                    st.error("Champs obligatoires manquants (Prénom, Nom, Email, Société) ou consentement.")
-                    return
-                lead = Lead(first_name=first.strip(), last_name=last.strip(),
-                            email=email.strip(), phone=phone.strip(),
-                            company=company.strip(), job=job.strip(),
-                            interest=interest, utm_source="qr-scan",
-                            ip_hash=get_client_ip_hash())
-                ok, msg = storage.save_lead(lead)
-                if ok:
-                    st.success("✅ Lead enregistré depuis QR.")
-                else:
-                    st.error(f"Erreur: {msg}")
-
-            if s_submit:
-                _save_lead(s_first, s_last, s_email, s_phone, s_company, s_job, s_interest, s_consent)
-
-            # Auto-enregistrement si demandé et nouveau QR
-            if auto_save and is_new:
-                # Utilise les valeurs parsées telles quelles; si incomplètes, on ne sauve pas
-                if parsed.get("first_name") and parsed.get("last_name") and parsed.get("email") and parsed.get("company"):
-                    _save_lead(parsed["first_name"], parsed["last_name"], parsed["email"],
-                               parsed.get("phone",""), parsed["company"], parsed.get("job",""),
-                               "Prise de contact", True)
-                else:
-                    st.info("QR détecté, mais informations incomplètes pour un auto-enregistrement. Complétez puis cliquez sur Enregistrer.")
-        else:
-            st.info("Aucun QR détecté pour l'instant. Approchez un QR net et bien éclairé à ~15-25 cm.")
-    st.subheader("Ou importer une image de QR")
-
+    st.subheader("Importer une image de QR")
+    
     img = st.file_uploader("Photo du QR (PNG/JPG)", type=["png","jpg","jpeg"])
     if img is not None:
         from modules.qr import decode_qr_from_bytes
@@ -301,10 +204,10 @@ with tab_scan:
                         st.info("QR décodé, mais informations incomplètes pour un auto-enregistrement automatique. Complétez via le formulaire Scan.")
             except Exception as e:
                 st.warning(f"Auto-save (image) non effectué: {e}")
-
+    
         else:
             st.error("Impossible de décoder un QR dans cette image.")
-
+    
 with tab_export:
     st.header("Exporter les leads")
     st.caption("CSV simple ou Excel (.xlsx) au format tableau avec filtres.")
