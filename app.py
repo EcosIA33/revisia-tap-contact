@@ -70,7 +70,10 @@ def build_header():
     col1, col2 = st.columns([1,1])
     with col1:
         if SHOW_LOGO and os.path.exists(LOGO_PATH):
-            st.image(LOGO_PATH, width=160)
+            try:
+                st.image(LOGO_PATH, width=160)
+            except Exception:
+                st.warning("Logo non lisible (format invalide). Désactivez SHOW_LOGO ou remplacez le fichier.")
         st.markdown(f"### {IDENTITY['FN']}")
         st.caption(f"{IDENTITY['TITLE']} — {IDENTITY['ORG']}")
         st.write(f"📧 {IDENTITY['EMAIL']} • 📞 {IDENTITY['TEL']}")
@@ -112,7 +115,10 @@ def build_header():
         else:
             qr_bytes = load_image_bytes(QR_IMAGE_PATH)
         if SHOW_QR_IN_HEADER and qr_bytes:
-            st.image(qr_bytes, width=300, caption="Scannez le QR pour récupérer ma carte")
+            try:
+                st.image(qr_bytes, width=300, caption="Scannez le QR pour récupérer ma carte")
+            except Exception:
+                st.warning("Image QR en-tête invalide. Remplacez `assets/qr.png` ou renseignez QR_TARGET_URL dans .env.")
 
 def _lead_form(initial: Optional[Dict[str,str]] = None, key: str = "lead_form"):
     initial = initial or {}
