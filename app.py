@@ -42,6 +42,9 @@ DATA_DIR = Path(os.getenv("DATA_DIR", "data"))
 LOGS_DIR = Path(os.getenv("LOGS_DIR", "logs"))
 ensure_data_dir(DATA_DIR)
 
+# Option d’UI : toujours afficher le choix d’appareil photo
+SHOW_CAMERA_CHOICE = os.getenv('SHOW_CAMERA_CHOICE', 'true').lower() != 'false'
+
 # --- Identité (.env) ---
 IDENTITY: Dict[str, str] = {
     "FN": os.getenv("FULL_NAME", "Votre Nom"),
@@ -172,7 +175,7 @@ with tab_share:
 
 with tab_scan:
     st.header("Scanner un QR visiteur")
-    st.caption("Choisissez la caméra **Arrière**. Si besoin, utilisez le *Mode photo (recommandé)* en dessous.")
+    st.caption("Choisissez l’appareil photo **Arrière** ou **Avant**. Si la capture ne démarre pas, essayez l’autre option. Vous pouvez aussi utiliser le *Mode photo* ci‑dessous.")
 
     if not QR_ENABLED:
         st.warning("Scanner live indisponible : installez 'streamlit-webrtc', 'opencv-python(-headless)', 'av', 'aiortc', 'numpy'.")
@@ -183,52 +186,41 @@ with tab_scan:
         class QRProcessor(VideoTransformerBase):  # type: ignore[misc]
             def __init__(self) -> None:
                 self.last_result: Optional[str] = None
-                # Reuse detector to reduce per-frame allocations
                 self._detector = cv2.QRCodeDetector()
-                self._frame_count = 0
-
+                self._n = 0
             def transform(self, frame):
                 img = frame.to_ndarray(format="bgr24")
-                self._frame_count += 1
-
-                # Try to decode every 2 frames to lighten CPU
-                if self._frame_count % 2 == 0:
-                    try:
-                        from modules.qr import decode_qr_from_ndarray
-                        data = decode_qr_from_ndarray(img)
-                        if data:
-                            self.last_result = data
-                    except Exception:
-                        pass
-
-                # Draw a guide when a QR is detected (helps aiming)
+                self._n += 1
                 try:
-                    ok, points = self._detector.detect(img)
-                    if ok and points is not None:
-                        for p in points:
-                            pts = p.astype(int).reshape((-1, 1, 2))
-                            cv2.polylines(img, [pts], True, (0, 255, 0), 2)
+                    from modules.qr import decode_qr_from_ndarray
+                    data = decode_qr_from_ndarray(img)
+                    if data:
+                        self.last_result = data
                 except Exception:
                     pass
-
+                # Dessin d'un cadre sur le QR détecté (guidage)
+                try:
+                    ok, pts = self._detector.detect(img)
+                    if ok and pts is not None:
+                        for p in pts:
+                            poly = p.astype('int32').reshape((-1,1,2))
+                            cv2.polylines(img, [poly], True, (0,255,0), 2)
+                except Exception:
+                    pass
                 return img
 
-        # Force rear camera by default (configurable via FORCE_REAR_CAMERA env var)
-        force_rear = os.getenv("FORCE_REAR_CAMERA", "true").lower() != "false"
-        facing = "environment" if force_rear else "user"
+        if SHOW_CAMERA_CHOICE:
+            cam_side = st.radio("Appareil photo", ["Arrière (recommandée)", "Avant"], horizontal=True, index=0)
+        else:
+            cam_side = "Arrière (recommandée)"
+        facing = "environment" if cam_side.startswith("Arrière") else "user"
 
         ctx = webrtc_streamer(
             key="qr-scan",
             mode=WebRtcMode.SENDRECV,
             rtc_configuration=RTC_CONFIGURATION,
             media_stream_constraints={
-                "video": {
-                    "facingMode": ({"exact": "environment"} if facing == "environment" else {"ideal": "user"}),
-                    "width": {"ideal": 1280},
-                    "height": {"ideal": 720},
-                    "frameRate": {"ideal": 30},
-                    **({"advanced": [{"facingMode": "environment"}]} if facing == "environment" else {}),
-                },
+                "video": {"facingMode": ({"exact": facing} if facing in ["environment","user"] else {"ideal": facing}), "width": {"ideal": 1280}, "height": {"ideal": 720}, **({"advanced": [{"facingMode": facing}]})},
                 "audio": False
             },
             video_transformer_factory=QRProcessor,
