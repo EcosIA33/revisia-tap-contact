@@ -179,6 +179,9 @@ with tab_scan:
         from streamlit_webrtc import webrtc_streamer, WebRtcMode, VideoTransformerBase, RTCConfiguration
 
         class QRProcessor(VideoTransformerBase):  # type: ignore[misc]
+        # -- UI: choix caméra --
+        # (Avant/Arrière) influence `facingMode`
+
             def __init__(self) -> None:
                 self.detector = cv2.QRCodeDetector()
                 self.last_result: Optional[str] = None
@@ -193,17 +196,19 @@ with tab_scan:
                     pass
                 return img
 
-        ctx = webrtc_streamer(
-            key="qr-scan",
-            mode=WebRtcMode.SENDRECV,
-            rtc_configuration=RTC_CONFIGURATION,
-            media_stream_constraints={
-                "video": {"facingMode": {"ideal": "environment"}, "width": {"ideal": 1280}, "height": {"ideal": 720}},
-                "audio": False
-            },
-            video_transformer_factory=QRProcessor,
-            async_processing=True,
-        )
+        cam_side = st.radio("Caméra utilisée", ["Arrière (recommandée)", "Avant"], horizontal=True)
+facing = "environment" if cam_side.startswith("Arrière") else "user"
+ctx = webrtc_streamer(
+    key="qr-scan",
+    mode=WebRtcMode.SENDRECV,
+    rtc_configuration=RTC_CONFIGURATION,
+    media_stream_constraints={
+        "video": {"facingMode": {"ideal": facing}, "width": {"ideal": 1280}, "height": {"ideal": 720}},
+        "audio": False
+    },
+    video_transformer_factory=QRProcessor,
+    async_processing=True,
+)
 
         
         if "qr_last" not in st.session_state:
