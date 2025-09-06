@@ -35,6 +35,7 @@ IDENTITY: Dict[str,str] = {
     "FN": os.getenv("FN", "Adrian Rodriguez"),
     "N_LAST": os.getenv("N_LAST", "Rodriguez"),
     "N_FIRST": os.getenv("N_FIRST", "Adrian"),
+    "ORG": os.getenv("ORG", "DRIVN"),
     "TITLE": os.getenv("TITLE", "Fondateur"),
     "TEL": os.getenv("TEL", "+33 6 27 16 52 05"),
     "EMAIL": os.getenv("EMAIL", "adrian@drivn.fr"),
@@ -147,6 +148,7 @@ def _lead_form(initial: Optional[Dict[str,str]] = None, key: str = "lead_form"):
 
 def tab_scan():
     st.subheader("Scanner un QR (image)")
+    st.caption("🎯 La capture **vidéo** a été retirée. Importez une photo du QR (PNG/JPG).")
     img = st.file_uploader("Photo du QR", type=["png","jpg","jpeg"], key="qr_upload")
     if img is not None:
         data = decode_qr_from_bytes(img.read())
