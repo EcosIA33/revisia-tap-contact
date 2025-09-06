@@ -1,253 +1,241 @@
-
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+PATCHED5:
+- Suppression de la webcam pour le scan QR (import image uniquement)
+- Persistance des leads (édition/suppression) dans data/leads.csv
+"""
+from __future__ import annotations
 import os
-import tempfile
+import io
+import logging
+from pathlib import Path
+from typing import Optional, Dict
+
 import streamlit as st
+import pandas as pd
+from dotenv import load_dotenv
 
-# --- Persistence (SQLite) ---
-# Requires modules/storage.py from the provided pack.
-from modules import storage
+from modules.storage import Storage, StorageConfig, Lead
+from modules.qr import decode_qr_from_bytes, parse_contact_from_qr
+from modules.contact import build_vcard_bytes
 
-st.set_page_config(page_title="RevisIA – Leads", page_icon="🗂️", layout="wide")
+# --- Logs ---
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+logger = logging.getLogger("revisia.tap")
 
-# Try default "data/leads.db", then fall back to /tmp when not writable
-FALLBACK_MSG = ""
-try:
-    DB_PATH = storage.init_db()  # default: data/leads.db
-except Exception as e:
-    tmp_dir = os.path.join(tempfile.gettempdir(), "revisia_data")
-    os.makedirs(tmp_dir, exist_ok=True)
-    fallback = os.path.join(tmp_dir, "leads.db")
-    DB_PATH = storage.init_db(fallback)
-    FALLBACK_MSG = (
-        f"Stockage déplacé vers {DB_PATH} (cause: {e}). "
-        "Vous pouvez aussi définir LEADS_DB_PATH pour choisir un autre chemin."
-    )
+# --- Config ---
+load_dotenv(override=True)
+APP_NAME = os.getenv("APP_NAME", "RevisIA — Tap Contact (Salon)")
+DATA_DIR = Path(os.getenv("DATA_DIR", "data"))
+LEADS_CSV = Path(os.getenv("LEADS_CSV", DATA_DIR / "leads.csv"))
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-# ------ Helpers ------
-def _save_lead(first_name, last_name, email, phone, company, job, source, consent):
-    """Persist lead in SQLite and return a normalized dict."""
-    storage.upsert_lead(first_name, last_name, email, phone, company, job, source, consent)
-    return {
-        "first_name": (first_name or "").strip(),
-        "last_name": (last_name or "").strip(),
-        "email": (email or "").strip().lower(),
-        "phone": (phone or "").strip(),
-        "company": (company or "").strip(),
-        "job": (job or "").strip(),
-        "source": (source or "").strip(),
-        "consent": bool(consent),
-    }
+IDENTITY: Dict[str,str] = {
+    "FN": os.getenv("FN", "Prenom Nom"),
+    "N_LAST": os.getenv("N_LAST", "Nom"),
+    "N_FIRST": os.getenv("N_FIRST", "Prenom"),
+    "ORG": os.getenv("ORG", "Votre Société"),
+    "TITLE": os.getenv("TITLE", "Fonction"),
+    "TEL": os.getenv("TEL", "+33 6 00 00 00 00"),
+    "EMAIL": os.getenv("EMAIL", "vous@example.com"),
+    "URL": os.getenv("URL", "https://www.exemple.com"),
+    "ADR_STREET": os.getenv("ADR_STREET", ""),
+    "ADR_CITY": os.getenv("ADR_CITY", ""),
+    "ADR_PC": os.getenv("ADR_PC", ""),
+    "ADR_COUNTRY": os.getenv("ADR_COUNTRY", "France"),
+}
 
-def decode_qr_from_bytes(b: bytes):
-    """Delegates to modules.qr if available; otherwise returns None."""
+PHOTO_PATH = os.getenv("PHOTO_PATH", "assets/photo.jpg")
+SHOW_QR_IN_HEADER = os.getenv("SHOW_QR_IN_HEADER", "true").lower() in ("1","true","yes","on")
+QR_IMAGE_PATH = os.getenv("QR_IMAGE_PATH", "assets/qr.png")
+QR_TARGET_URL = os.getenv("QR_TARGET_URL", "")  # si défini + 'qrcode' présent, on génère dyn.
+SHOW_DOWNLOAD_BUTTON = os.getenv("SHOW_DOWNLOAD_BUTTON", "false").lower() in ("1","true","yes","on")
+LOGO_PATH = os.getenv("LOGO_PATH", "assets/logo.png")
+SHOW_LOGO = os.getenv("SHOW_LOGO", "true").lower() in ("1","true","yes","on")
+
+# --- Storage ---
+storage = Storage(StorageConfig(csv_path=LEADS_CSV))
+
+st.set_page_config(page_title=APP_NAME, page_icon="🎯", layout="centered")
+
+def load_image_bytes(path: str) -> Optional[bytes]:
     try:
-        from modules.qr import decode_qr_from_bytes as _real_decode
-        return _real_decode(b)
+        with open(path, "rb") as f:
+            return f.read()
     except Exception:
         return None
 
-def parse_contact_from_qr(data: str) -> dict:
-    """Lightweight vCard/MeCard parser + heuristics for email/phone."""
-    if not data:
-        return {}
-    d = {"first_name":"", "last_name":"", "email":"", "phone":"", "company":"", "job":""}
-    s = data.strip()
+def build_header():
+    col1, col2 = st.columns([1,1])
+    with col1:
+        if SHOW_LOGO and os.path.exists(LOGO_PATH):
+            st.image(LOGO_PATH, width=160)
+        st.markdown(f"### {IDENTITY['FN']}")
+        st.caption(f"{IDENTITY['TITLE']} — {IDENTITY['ORG']}")
+        st.write(f"📧 {IDENTITY['EMAIL']} • 📞 {IDENTITY['TEL']}")
 
-    # vCard rough parse
-    if "BEGIN:VCARD" in s.upper():
-        lines = [ln.strip() for ln in s.replace("\r","").split("\n")]
-        for ln in lines:
-            up = ln.upper()
-            if up.startswith("N:"):
-                try:
-                    body = ln.split(":",1)[1]
-                    parts = body.split(";")
-                    d["last_name"]  = (parts[0] or "").strip()
-                    d["first_name"] = (parts[1] or "").strip()
-                except Exception:
-                    pass
-            elif up.startswith("FN:"):
-                body = ln.split(":",1)[1].strip()
-                if not (d["first_name"] or d["last_name"]):
-                    bits = body.split()
-                    if len(bits) >= 2:
-                        d["first_name"], d["last_name"] = bits[0], " ".join(bits[1:])
-                    else:
-                        d["first_name"] = body
-            elif "EMAIL" in up:
-                try:
-                    d["email"] = ln.split(":",1)[1].strip()
-                except Exception:
-                    pass
-            elif up.startswith("TEL"):
-                try:
-                    d["phone"] = ln.split(":",1)[1].strip()
-                except Exception:
-                    pass
-            elif up.startswith("ORG:"):
-                d["company"] = ln.split(":",1)[1].strip()
-            elif up.startswith("TITLE:"):
-                d["job"] = ln.split(":",1)[1].strip()
-        return d
+        # vCard téléchargeable (optionnel)
+        photo_bytes = load_image_bytes(PHOTO_PATH)
+        vcard_bytes = build_vcard_bytes(
+            fn=IDENTITY["FN"],
+            n_last=IDENTITY["N_LAST"],
+            n_first=IDENTITY["N_FIRST"],
+            org=IDENTITY["ORG"],
+            title=IDENTITY["TITLE"],
+            tel=IDENTITY["TEL"],
+            email=IDENTITY["EMAIL"],
+            url=IDENTITY["URL"],
+            adr_street=IDENTITY["ADR_STREET"],
+            adr_city=IDENTITY["ADR_CITY"],
+            adr_pc=IDENTITY["ADR_PC"],
+            adr_country=IDENTITY["ADR_COUNTRY"],
+            photo_bytes=photo_bytes
+        )
+        if SHOW_DOWNLOAD_BUTTON:
+            st.download_button("📇 Sauvegarder le contact (.vcf)", data=vcard_bytes,
+                               file_name=f"{IDENTITY['FN'].replace(' ', '_')}.vcf",
+                               mime="text/vcard")
+    with col2:
+        qr_bytes: Optional[bytes] = None
+        # Si demandé, tente de générer un QR à la volée
+        if QR_TARGET_URL:
+            try:
+                import qrcode
+                qr = qrcode.QRCode(version=4, box_size=6, border=2)
+                qr.add_data(QR_TARGET_URL)
+                qr.make(fit=True)
+                img = qr.make_image(fill_color="black", back_color="white")
+                buf = io.BytesIO(); img.save(buf, format="PNG"); qr_bytes = buf.getvalue()
+            except Exception:
+                qr_bytes = load_image_bytes(QR_IMAGE_PATH)
+        else:
+            qr_bytes = load_image_bytes(QR_IMAGE_PATH)
+        if SHOW_QR_IN_HEADER and qr_bytes:
+            st.image(qr_bytes, width=300, caption="Scannez le QR pour récupérer ma carte")
 
-    # MeCard rough parse MECARD:N:Lastname,Firstname;TEL:;EMAIL:;ORG:;TITLE:;
-    if s.upper().startswith("MECARD:"):
-        try:
-            body = s[7:]
-            fields = body.split(";")
-            for f in fields:
-                if not f or ":" not in f:
-                    continue
-                k, v = f.split(":",1)
-                k = k.strip().upper()
-                v = v.strip()
-                if k == "N":
-                    parts = [p.strip() for p in v.split(",")]
-                    if len(parts) >= 2:
-                        d["last_name"], d["first_name"] = parts[0], parts[1]
-                    else:
-                        d["first_name"] = v
-                elif k == "TEL":
-                    d["phone"] = v
-                elif k == "EMAIL":
-                    d["email"] = v
-                elif k == "ORG":
-                    d["company"] = v
-                elif k == "TITLE":
-                    d["job"] = v
-        except Exception:
-            pass
-        return d
+def _lead_form(initial: Optional[Dict[str,str]] = None, key: str = "lead_form"):
+    initial = initial or {}
+    with st.form(key=key):
+        c1, c2 = st.columns(2)
+        with c1:
+            first_name = st.text_input("Prénom", value=initial.get("first_name",""))
+            email = st.text_input("Email", value=initial.get("email",""))
+            company = st.text_input("Société", value=initial.get("company",""))
+            interest = st.text_input("Intérêt", value=initial.get("interest","Prise de contact"))
+        with c2:
+            last_name = st.text_input("Nom", value=initial.get("last_name",""))
+            phone = st.text_input("Téléphone", value=initial.get("phone",""))
+            job = st.text_input("Fonction", value=initial.get("job",""))
+            utm = st.text_input("UTM/Source", value=initial.get("utm_source",""))
+        submitted = st.form_submit_button("💾 Enregistrer le lead")
+    if submitted:
+        if not (first_name and last_name and email and company):
+            st.error("Champs requis manquants (Prénom, Nom, Email, Société).")
+        else:
+            ok, msg = storage.append_lead(Lead(
+                first_name=first_name, last_name=last_name, email=email,
+                phone=phone, company=company, job=job,
+                interest=interest, utm_source=utm, ip_hash=""
+            ))
+            if ok:
+                st.success("Lead enregistré.")
+            else:
+                st.error(f"Erreur: {msg}")
 
-    # Fallback: heuristics
-    import re
-    m = re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", s)
-    if m:
-        d["email"] = m.group(0)
-    m = re.search(r"\+?\d[\d\s().-]{6,}", s)
-    if m:
-        d["phone"] = m.group(0).strip()
-    return d
-
-# ------ Sidebar ------
-with st.sidebar:
-    st.markdown("### Base de données")
-    st.caption(f"Chemin DB : `{DB_PATH}`")
-    st.caption("Variable d'env optionnelle : `LEADS_DB_PATH`")
-    if FALLBACK_MSG:
-        st.warning(FALLBACK_MSG)
-
-st.title("Gestion des leads (scanner & export)")
-
-tab_scan, tab_export = st.tabs(["Scanner un QR (image)", "Export (persistant)"])
-
-# ----------------- Scanner (image uniquement) -----------------
-with tab_scan:
-    st.header("Scanner un QR (depuis une image)")
-
-    AUTO_SAVE_ON_DECODE = os.getenv('AUTO_SAVE_ON_DECODE','0').lower() in ('1','true','yes','on')
-    if "qr_last" not in st.session_state:
-        st.session_state.qr_last = None
-
-    auto_save = st.checkbox("Auto-enregistrer dès qu'un QR valide est détecté", value=AUTO_SAVE_ON_DECODE)
-
-    st.subheader("Importer une image de QR")
-    img = st.file_uploader("Photo du QR (PNG/JPG)", type=["png","jpg","jpeg"])
+def tab_scan():
+    st.subheader("Scanner un QR (image)")
+    st.caption("🎯 La capture **vidéo** a été retirée. Importez une photo du QR (PNG/JPG).")
+    img = st.file_uploader("Photo du QR", type=["png","jpg","jpeg"], key="qr_upload")
     if img is not None:
         data = decode_qr_from_bytes(img.read())
         if data:
             st.info("QR décodé 👍")
             st.code(data, language="text")
-
             parsed = parse_contact_from_qr(data)
-            colA, colB = st.columns(2)
-            with colA:
-                first = st.text_input("Prénom", value=parsed.get("first_name",""))
-                last  = st.text_input("Nom", value=parsed.get("last_name",""))
-                email = st.text_input("Email *", value=parsed.get("email",""))
-                phone = st.text_input("Téléphone", value=parsed.get("phone",""))
-            with colB:
-                company = st.text_input("Société", value=parsed.get("company",""))
-                job     = st.text_input("Poste/Fonction", value=parsed.get("job",""))
-                source  = st.text_input("Source", value="QR")
-                consent = st.checkbox("Consentement RGPD", value=True)
-
-            # Auto-save (once per new content if email provided)
-            is_new = (data != st.session_state.qr_last)
-            if auto_save and is_new and email:
-                _save_lead(first, last, email, phone, company, job, source, consent)
-                st.session_state.qr_last = data
-                st.success("Lead enregistré automatiquement.")
-
-            if st.button("Enregistrer ce lead"):
-                _save_lead(first, last, email, phone, company, job, source, consent)
-                st.session_state.qr_last = data
-                st.success("Lead enregistré.")
+            st.write("Champs reconnus :", parsed)
+            _lead_form(parsed, key="lead_from_qr")
         else:
             st.error("Impossible de décoder un QR dans cette image.")
+    st.divider()
+    st.subheader("Saisie manuelle rapide")
+    _lead_form(key="lead_manual")
 
-# ----------------- Export (persistant) -----------------
-with tab_export:
-    st.header("Export (persistant)")
-    st.caption("Les leads enregistrés seront conservés même après fermeture de l'application.")
+def tab_export():
+    st.subheader("Export & gestion des leads (persistant)")
+    df = storage.load_df()
+    st.caption(f"{len(df)} ligne(s) chargée(s) depuis `{LEADS_CSV}`")
 
-    with st.expander("Ajouter un lead manuellement"):
-        with st.form("add_lead_form"):
-            col1, col2 = st.columns(2)
-            with col1:
-                first = st.text_input("Prénom")
-                last  = st.text_input("Nom")
-                email = st.text_input("Email *")
-                phone = st.text_input("Téléphone")
-            with col2:
-                company = st.text_input("Société")
-                job     = st.text_input("Poste/Fonction")
-                source  = st.text_input("Source", value="Export")
-                consent = st.checkbox("Consentement RGPD", value=True)
-            submitted = st.form_submit_button("Enregistrer le lead")
-            if submitted:
-                try:
-                    _save_lead(first, last, email, phone, company, job, source, consent)
-                    st.success("Lead enregistré de façon persistante (SQLite)." )
-                except Exception as e:
-                    st.error(f"Enregistrement impossible: {e}")
+    # Sélection pour suppression par ligne
+    if not df.empty:
+        sel = st.multiselect("Sélectionner des lignes à supprimer", df["id"].tolist(), key="to_delete")
+        if sel:
+            st.warning(f"{len(sel)} ligne(s) marquée(s) pour suppression.")
+            if st.button("🗑️ Supprimer la sélection", type="primary"):
+                df = df[~df["id"].isin(sel)].copy()
+                ok, msg = storage.overwrite_df(df)
+                if ok:
+                    st.success("Suppression effectuée.")
+                else:
+                    st.error(f"Erreur de sauvegarde: {msg}")
 
-    st.subheader("Leads enregistrés")
-    rows = storage.list_leads()
+    # Édition
+    edited = st.data_editor(
+        df,
+        num_rows="dynamic",
+        hide_index=True,
+        column_config={"created_at": st.column_config.TextColumn("Créé le", disabled=True),
+                       "id": st.column_config.TextColumn("ID", disabled=True)},
+        use_container_width=True,
+        key="editor",
+    )
+    if st.button("💾 Enregistrer les modifications"):
+        ok, msg = storage.overwrite_df(edited)
+        if ok:
+            st.success("Modifications enregistrées dans le CSV (persistant).")
+        else:
+            st.error(f"Erreur: {msg}")
 
-    if rows:
-        # Aperçu tableau
-        st.dataframe(rows, use_container_width=True, hide_index=True)
+    # Exports
+    c1, c2 = st.columns(2)
+    with c1:
+        csv_bytes = edited.to_csv(index=False).encode("utf-8")
+        st.download_button("⬇️ Télécharger CSV", data=csv_bytes, file_name="leads.csv", mime="text/csv")
+    with c2:
+        try:
+            from openpyxl import Workbook
+            from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+            from io import BytesIO
+            wb = Workbook(); ws = wb.active; ws.title = "Leads"
+            headers = list(edited.columns)
+            ws.append(headers)
+            # styles
+            header_fill = PatternFill("solid", fgColor="1f4e78")
+            header_font = Font(color="FFFFFF", bold=True)
+            for cell in ws[1]:
+                cell.fill = header_fill; cell.font = header_font
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+            for _, row in edited.iterrows():
+                ws.append([str(row.get(h,"")) for h in headers])
+            ws.freeze_panes = "A2"
+            for col in ws.columns:
+                max_len = max(len(str(c.value)) if c.value else 0 for c in col)
+                ws.column_dimensions[col[0].column_letter].width = min(max(12, max_len+2), 40)
+            buf = BytesIO(); wb.save(buf)
+            st.download_button("📊 Télécharger Excel (.xlsx)", data=buf.getvalue(),
+                               file_name="leads.xlsx",
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        except Exception as e:
+            st.error(f"Erreur export: {e}")
 
-        st.markdown("### Gestion par ligne")
-        st.caption("Supprimez une ligne précise via le bouton 🗑️.")
+def main():
+    build_header()
+    st.divider()
+    tab1, tab2 = st.tabs(["🔍 Scanner un QR", "📤 Export & gestion"])
+    with tab1:
+        tab_scan()
+    with tab2:
+        tab_export()
 
-        # Suppression par ligne (bouton)
-        for r in rows:
-            with st.container():
-                c1, c2, c3, c4 = st.columns([4,3,3,1])
-                with c1:
-                    st.write(f"**#{r['id']}** — {r['first_name']} {r['last_name']}")
-                with c2:
-                    st.write(r.get('email',''))
-                with c3:
-                    st.write(r.get('company',''))
-                with c4:
-                    if st.button("🗑️", key=f"del_{r['id']}", help="Supprimer ce lead"):
-                        try:
-                            storage.delete_lead(int(r["id"]))
-                            st.success(f"Lead #{r['id']} supprimé.")
-                            st.rerun()
-                        except Exception as e:
-                            st.warning(f"Suppression impossible: {e}")
-
-        # Export CSV
-        csv_bytes = storage.export_csv_bytes()
-        st.download_button(
-            "Télécharger en CSV",
-            data=csv_bytes,
-            file_name="leads_export.csv",
-            mime="text/csv"
-        )
-    else:
-        st.info("Aucun lead enregistré pour le moment.")
+if __name__ == "__main__":
+    main()

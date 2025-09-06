@@ -13,20 +13,26 @@ def _fold_line(line: str, width: int = 74) -> str:
 def _jpeg_base64(photo_bytes: bytes) -> str:
     img = Image.open(io.BytesIO(photo_bytes)).convert("RGB")
     img.thumbnail((800, 800))
-    w, h = img.size
-    side = max(w, h)
-    canvas = Image.new("RGB", (side, side), (255, 255, 255))
-    canvas.paste(img, ((side - w) // 2, (side - h) // 2))
-    out = io.BytesIO()
-    canvas.save(out, format="JPEG", quality=85, optimize=True)
-    return base64.b64encode(out.getvalue()).decode("ascii")
+    buffered = io.BytesIO()
+    img.save(buffered, format="JPEG", quality=85)
+    return base64.b64encode(buffered.getvalue()).decode("ascii")
 
 def build_vcard_bytes(
-    fn: str, n_last: str, n_first: str, org: str, title: str,
-    tel: str, email: str, url: str, adr_street: str, adr_city: str,
-    adr_pc: str, adr_country: str, photo_bytes: Optional[bytes] = None
+    fn: str,
+    n_last: str,
+    n_first: str,
+    org: str,
+    title: str,
+    tel: str,
+    email: str,
+    url: str,
+    adr_street: str,
+    adr_city: str,
+    adr_pc: str,
+    adr_country: str,
+    photo_bytes: Optional[bytes] = None,
 ) -> bytes:
-    url_norm = url if url.startswith(("http://", "https://")) else "https://" + url
+    url_norm = (url or "").replace(";", "\\;").replace(",", "\\,")
     lines = [
         "BEGIN:VCARD",
         "VERSION:3.0",

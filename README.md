@@ -1,18 +1,30 @@
-# Tap-to-Contact — Édition Salon
+# RevisIA — Tap Contact (Salon) · PATCHED5
 
-- QR en en-tête (image `assets/qr.png` ou QR dynamique via `QR_TARGET_URL`).
-- Scanner QR (caméra arrière) pour pré-remplir les leads.
-- Export **CSV** et **Excel .xlsx** au format **Table** (filtres, en-têtes figées).
+Modifications demandées :  
+1) Suppression de la capture vidéo dans **Scanner un QR** ; on ne garde que l'import d'image.  
+2) Persistance des leads **même après fermeture** : toute saisie/édition dans l'onglet *Export & gestion* est enregistrée dans `data/leads.csv`.  
+3) Possibilité de **corriger** (édition directe) et **supprimer par ligne**.
 
-## Lancer
+## Installation rapide
 ```bash
+python -m venv .venv && source .venv/bin/activate  # sous Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+```
+## Lancement
+```bash
 streamlit run app.py
 ```
+## Tests
+```bash
+pytest -q
+ruff check .
+mypy .
+```
 
-## Config (.env)
-```
-SHOW_QR_IN_HEADER=true
-QR_TARGET_URL="https://.../ton.vcf"  # sinon l'appli affiche assets/qr.png
-SHOW_DOWNLOAD_BUTTON=false
-```
+## Données
+- Fichier persistant : `data/leads.csv` (créé automatiquement).
+
+## Notes techniques
+- Décodage QR via OpenCV (`cv2.QRCodeDetector`) pour éviter les dépendances système.
+- Export Excel stylisé (openpyxl).
+- Édition & suppression par ligne : via `st.data_editor` + boutons associés, puis sauvegarde.
