@@ -185,9 +185,10 @@ with tab_scan:
             def transform(self, frame):
                 img = frame.to_ndarray(format="bgr24")
                 try:
-                    data, points, _ = self.detector.detectAndDecode(img)
+                    from modules.qr import decode_qr_from_ndarray
+                    data = decode_qr_from_ndarray(img)
                     if data:
-                        self.last_result = data.strip()
+                        self.last_result = data
                 except Exception:
                     pass
                 return img

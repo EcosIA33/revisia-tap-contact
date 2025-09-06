@@ -1,9 +1,65 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
-import re, io
-from typing import Dict, Optional
+import re
+from typing import Dict, Optional, Tuple, List
+
 import numpy as np  # type: ignore
 import cv2  # type: ignore
+
+def _try_decode(detector: cv2.QRCodeDetector, img) -> Tuple[Optional[str], Optional[np.ndarray]]:
+    # Try single decode
+    data, pts, _ = detector.detectAndDecode(img)
+    if data:
+        return data.strip(), pts
+    # Try multi decode
+    try:
+        retval, decoded_info, points, _ = detector.detectAndDecodeMulti(img)
+        if retval and decoded_info:
+            for s in decoded_info:
+                if s:
+                    return s.strip(), points
+    except Exception:
+        pass
+    return None, None
+
+def decode_qr_from_ndarray(img) -> Optional[str]:
+    """
+    Robust QR decode from a BGR ndarray. Tries multiple preprocess steps.
+    """
+    detector = cv2.QRCodeDetector()
+    # 1) Raw
+    data, _ = _try_decode(detector, img)
+    if data: return data
+    # 2) Grayscale
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    data, _ = _try_decode(detector, gray)
+    if data: return data
+    # 3) CLAHE (contrast)
+    try:
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+        eq = clahe.apply(gray)
+        data, _ = _try_decode(detector, eq)
+        if data: return data
+    except Exception:
+        pass
+    # 4) Adaptive threshold
+    th = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                               cv2.THRESH_BINARY, 31, 2)
+    data, _ = _try_decode(detector, th)
+    if data: return data
+    # 5) Resize (upscale)
+    h, w = gray.shape[:2]
+    if max(h, w) < 1200:
+        big = cv2.resize(gray, (w*2, h*2), interpolation=cv2.INTER_CUBIC)
+        data, _ = _try_decode(detector, big)
+        if data: return data
+    # 6) Center crop
+    ch, cw = int(h*0.6), int(w*0.6)
+    y0, x0 = (h - ch)//2, (w - cw)//2
+    crop = gray[y0:y0+ch, x0:x0+cw]
+    data, _ = _try_decode(detector, crop)
+    if data: return data
+    return None
 
 def decode_qr_from_bytes(img_bytes: bytes) -> Optional[str]:
     try:
@@ -11,9 +67,7 @@ def decode_qr_from_bytes(img_bytes: bytes) -> Optional[str]:
         img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
         if img is None:
             return None
-        detector = cv2.QRCodeDetector()
-        data, points, _ = detector.detectAndDecode(img)
-        return data.strip() if data else None
+        return decode_qr_from_ndarray(img)
     except Exception:
         return None
 
