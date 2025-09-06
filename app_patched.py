@@ -212,25 +212,7 @@ with tab_scan:
                     pass
 
                 return img
-
-        # Force rear camera by default (configurable via FORCE_REAR_CAMERA env var)
-        force_rear = os.getenv("FORCE_REAR_CAMERA", "true").lower() != "false"
-        facing = "environment" if force_rear else "user"
-
-        ctx = webrtc_streamer(
-            key="qr-scan",
-            mode=WebRtcMode.SENDRECV,
-            rtc_configuration=RTC_CONFIGURATION,
-            media_stream_constraints={
-                "video": {
-                    "facingMode": ({"exact": "environment"} if facing == "environment" else {"ideal": "user"}),
-                    "width": {"ideal": 1280},
-                    "height": {"ideal": 720},
-                    "frameRate": {"ideal": 30},
-                    **({"advanced": [{"facingMode": "environment"}]} if facing == "environment" else {}),
-                },
-                "audio": False
-            },
+,
             video_transformer_factory=QRProcessor,
             async_processing=True,
         )

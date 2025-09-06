@@ -16,3 +16,7 @@ SHOW_QR_IN_HEADER=true
 QR_TARGET_URL="https://.../ton.vcf"  # sinon l'appli affiche assets/qr.png
 SHOW_DOWNLOAD_BUTTON=false
 ```
+
+### Astuces / Config caméra
+- **Caméra arrière forcée** en live scan (WebRTC). Vous pouvez la désactiver via `FORCE_REAR_CAMERA=false` dans `.env` si besoin.
+- Sur **mobile**, l'accès caméra nécessite **HTTPS** (ou `localhost`). Hébergez l'app derrière un domaine en HTTPS pour que le scanner fonctionne.
