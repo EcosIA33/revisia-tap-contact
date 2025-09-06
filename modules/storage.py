@@ -3,8 +3,8 @@
 Persistent storage for leads using SQLite (stdlib only).
 
 - Database file: data/leads.db (override with env LEADS_DB_PATH)
-- Safe to import multiple times; keeps a single connection.
-- Provides upsert, list, delete, and CSV export helpers.
+- Provides: init_db, upsert_lead, list_leads, delete_lead, export_csv_bytes/export_csv_to_path
+- Email is the unique key by default (idempotent saves).
 """
 
 from __future__ import annotations
@@ -16,7 +16,8 @@ _LOCK = threading.RLock()
 
 
 def _connect(db_path: str) -> sqlite3.Connection:
-    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    folder = os.path.dirname(db_path) or "."
+    os.makedirs(folder, exist_ok=True)
     con = sqlite3.connect(db_path, check_same_thread=False)
     con.execute("""
     CREATE TABLE IF NOT EXISTS leads (
@@ -93,7 +94,8 @@ def delete_lead(lead_id: int) -> None:
 def export_csv_to_path(path: str) -> str:
     """Write current leads to CSV file at `path` and return the path."""
     rows = list_leads()
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    folder = os.path.dirname(path) or "."
+    os.makedirs(folder, exist_ok=True)
     headers = ["id","first_name","last_name","email","phone","company","job","source","consent","created_at","updated_at"]
     with open(path, "w", encoding="utf-8", newline="") as f:
         w = csv.DictWriter(f, fieldnames=headers)
