@@ -5,12 +5,11 @@ Pillow>=10.2
 filelock>=3.13
 gspread>=6.0
 oauth2client>=4.1
-
-# QR live scanner
+# QR/live scan
 streamlit-webrtc>=0.47
 opencv-python-headless>=4.9
 numpy>=1.26
 av>=11
 aiortc>=1.7
-
+qrcode>=7.4
 openpyxl>=3.1

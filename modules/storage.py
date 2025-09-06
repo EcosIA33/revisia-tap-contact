@@ -4,17 +4,14 @@ import csv
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple
-
 from filelock import FileLock
 
-# Google Sheets (optionnel)
 try:
     import gspread
     from oauth2client.service_account import ServiceAccountCredentials
 except Exception:  # pragma: no cover
     gspread = None
     ServiceAccountCredentials = None  # type: ignore
-
 
 @dataclass
 class Lead:
@@ -28,13 +25,11 @@ class Lead:
     utm_source: str
     ip_hash: str
 
-
 @dataclass
 class StorageConfig:
     csv_path: Path
     gsheet_id: Optional[str] = None
     gservice_json: Optional[str] = None
-
 
 class Storage:
     def __init__(self, cfg: StorageConfig) -> None:
@@ -44,12 +39,11 @@ class Storage:
             with open(self.cfg.csv_path, "w", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f)
                 writer.writerow([
-                    "first_name", "last_name", "email", "phone", "company",
-                    "job", "interest", "utm_source", "ip_hash"
+                    "first_name","last_name","email","phone","company",
+                    "job","interest","utm_source","ip_hash"
                 ])
 
     def save_lead(self, lead: Lead) -> Tuple[bool, str]:
-        """Append to CSV and to Google Sheets if configured."""
         try:
             lock = FileLock(str(self.cfg.csv_path) + ".lock")
             with lock:
@@ -62,7 +56,6 @@ class Storage:
         except Exception as e:
             return False, f"CSV error: {e}"
 
-        # Google Sheets (optionnel)
         if self.cfg.gsheet_id and self.cfg.gservice_json and gspread and ServiceAccountCredentials:
             try:
                 scope = ["https://spreadsheets.google.com/feeds",
@@ -75,7 +68,5 @@ class Storage:
                     lead.company, lead.job, lead.interest, lead.utm_source, lead.ip_hash
                 ])
             except Exception as e:
-                # Ne pas échouer si Google Sheets indispo
                 return True, f"Lead enregistré (CSV). Google Sheets: {e}"
-
         return True, "OK"
