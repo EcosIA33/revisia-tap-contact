@@ -26,7 +26,7 @@ from modules.qr import parse_contact_from_qr
 try:
     import av  # noqa: F401
     import cv2  # noqa: F401
-    from streamlit_webrtc import webrtc_streamer, WebRtcMode, VideoProcessorBase, RTCConfiguration
+    from streamlit_webrtc import webrtc_streamer, WebRtcMode, VideoTransformerBase, RTCConfiguration
     QR_ENABLED = True
 except Exception:
     QR_ENABLED = False
@@ -176,9 +176,9 @@ with tab_scan:
         st.warning("Scanner live indisponible : installez 'streamlit-webrtc', 'opencv-python(-headless)', 'av', 'aiortc', 'numpy'.")
     else:
         import cv2  # type: ignore
-        from streamlit_webrtc import webrtc_streamer, WebRtcMode, VideoProcessorBase, RTCConfiguration
+        from streamlit_webrtc import webrtc_streamer, WebRtcMode, VideoTransformerBase, RTCConfiguration
 
-        class QRProcessor(VideoProcessorBase):  # type: ignore[misc]
+        class QRProcessor(VideoTransformerBase):  # type: ignore[misc]
             def __init__(self) -> None:
                 self.detector = cv2.QRCodeDetector()
                 self.last_result: Optional[str] = None
@@ -201,17 +201,16 @@ with tab_scan:
                 "video": {"facingMode": {"ideal": "environment"}, "width": {"ideal": 1280}, "height": {"ideal": 720}},
                 "audio": False
             },
-            video_processor_factory=QRProcessor,
+            video_transformer_factory=QRProcessor,
             async_processing=True,
         )
 
         
-        AUTO_SAVE_ON_DECODE = os.getenv('AUTO_SAVE_ON_DECODE','0').lower() in ('1','true','yes','on')
         if "qr_last" not in st.session_state:
             st.session_state.qr_last = None
-        auto_save = st.checkbox("Auto-enregistrer dès qu'un QR valide est détecté", value=AUTO_SAVE_ON_DECODE)
+        auto_save = st.checkbox("Auto-enregistrer dès qu'un QR valide est détecté", value=False)
 
-        qr_text = ctx.video_processor.last_result if ctx and ctx.video_processor else None
+        qr_text = ctx.video_transformer.last_result if ctx and ctx.video_transformer else None
         if qr_text:
             # Afficher le brut pour debug
             with st.expander("Voir le contenu brut du QR détecté"):
@@ -282,26 +281,6 @@ with tab_scan:
         if data:
             st.info("QR décodé 👍")
             st.code(data, language="text")
-            # Auto-save on image upload if enabled
-            try:
-                from modules.qr import parse_contact_from_qr
-                parsed = parse_contact_from_qr(data)
-                if "qr_last" not in st.session_state:
-                    st.session_state.qr_last = None
-                is_new_upload = (data != st.session_state.qr_last)
-                if is_new_upload:
-                    st.session_state.qr_last = data
-                if (auto_save or AUTO_SAVE_ON_DECODE) and is_new_upload:
-                    if parsed.get("first_name") and parsed.get("last_name") and parsed.get("email") and parsed.get("company"):
-                        _save_lead(parsed["first_name"], parsed["last_name"], parsed["email"],
-                                   parsed.get("phone",""), parsed["company"], parsed.get("job",""),
-                                   "Prise de contact", True)
-                        st.success("Lead enregistré automatiquement (import image).")
-                    else:
-                        st.info("QR décodé, mais informations incomplètes pour un auto-enregistrement automatique. Complétez via le formulaire Scan.")
-            except Exception as e:
-                st.warning(f"Auto-save (image) non effectué: {e}")
-
         else:
             st.error("Impossible de décoder un QR dans cette image.")
 
@@ -319,7 +298,7 @@ with tab_export:
     else:
         try:
             df = pd.read_csv(csv_path, dtype=str).fillna("")
-            st.dataframe(df, width='stretch')
+            st.dataframe(df, use_container_width=True)
             st.download_button("📄 Télécharger CSV", data=csv_path.read_bytes(),
                                file_name="leads.csv", mime="text/csv")
             # Excel stylé
