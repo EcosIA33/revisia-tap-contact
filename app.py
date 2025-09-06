@@ -4,11 +4,12 @@ import tempfile
 import streamlit as st
 
 # --- Persistence (SQLite) ---
+# Requires modules/storage.py from the provided pack.
 from modules import storage
 
 st.set_page_config(page_title="RevisIA – Leads", page_icon="🗂️", layout="wide")
 
-# Try default "data/leads.db", then fall back to /tmp if read-only or not writable
+# Try default "data/leads.db", then fall back to /tmp when not writable
 FALLBACK_MSG = ""
 try:
     DB_PATH = storage.init_db()  # default: data/leads.db
@@ -17,23 +18,28 @@ except Exception as e:
     os.makedirs(tmp_dir, exist_ok=True)
     fallback = os.path.join(tmp_dir, "leads.db")
     DB_PATH = storage.init_db(fallback)
-    FALLBACK_MSG = f"Stockage déplacé vers {DB_PATH} (cause: {e}). Vous pouvez aussi définir LEADS_DB_PATH."
+    FALLBACK_MSG = (
+        f"Stockage déplacé vers {DB_PATH} (cause: {e}). "
+        "Vous pouvez aussi définir LEADS_DB_PATH pour choisir un autre chemin."
+    )
 
 # ------ Helpers ------
 def _save_lead(first_name, last_name, email, phone, company, job, source, consent):
+    \"\"\"Persist lead in SQLite and return a normalized dict.\"\"\"
     storage.upsert_lead(first_name, last_name, email, phone, company, job, source, consent)
     return {
-        "first_name": first_name or "",
-        "last_name": last_name or "",
+        "first_name": (first_name or "").strip(),
+        "last_name": (last_name or "").strip(),
         "email": (email or "").strip().lower(),
-        "phone": phone or "",
-        "company": company or "",
-        "job": job or "",
-        "source": source or "",
+        "phone": (phone or "").strip(),
+        "company": (company or "").strip(),
+        "job": (job or "").strip(),
+        "source": (source or "").strip(),
         "consent": bool(consent),
     }
 
 def decode_qr_from_bytes(b: bytes):
+    \"\"\"Delegates to modules.qr if available; otherwise returns None.\"\"\"
     try:
         from modules.qr import decode_qr_from_bytes as _real_decode
         return _real_decode(b)
@@ -41,14 +47,15 @@ def decode_qr_from_bytes(b: bytes):
         return None
 
 def parse_contact_from_qr(data: str) -> dict:
+    \"\"\"Lightweight vCard/MeCard parser + heuristics for email/phone.\"\"\"
     if not data:
         return {}
     d = {"first_name":"", "last_name":"", "email":"", "phone":"", "company":"", "job":""}
     s = data.strip()
 
-    # vCard rough
+    # vCard rough parse
     if "BEGIN:VCARD" in s.upper():
-        lines = [ln.strip() for ln in s.replace("\r","").split("\n")]
+        lines = [ln.strip() for ln in s.replace("\\r","").split("\\n")]
         for ln in lines:
             up = ln.upper()
             if up.startswith("N:"):
@@ -83,7 +90,7 @@ def parse_contact_from_qr(data: str) -> dict:
                 d["job"] = ln.split(":",1)[1].strip()
         return d
 
-    # MeCard rough MECARD:N:Lastname,Firstname;TEL:;EMAIL:;ORG:;TITLE:;
+    # MeCard rough parse MECARD:N:Lastname,Firstname;TEL:;EMAIL:;ORG:;TITLE:;
     if s.upper().startswith("MECARD:"):
         try:
             body = s[7:]
@@ -112,12 +119,12 @@ def parse_contact_from_qr(data: str) -> dict:
             pass
         return d
 
-    # Fallback: try to find email & phone heuristically
+    # Fallback: heuristics
     import re
-    m = re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", s)
+    m = re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", s)
     if m:
         d["email"] = m.group(0)
-    m = re.search(r"\+?\d[\d\s().-]{6,}", s)
+    m = re.search(r"\\+?\\d[\\d\\s().-]{6,}", s)
     if m:
         d["phone"] = m.group(0).strip()
     return d
@@ -165,6 +172,7 @@ with tab_scan:
                 source  = st.text_input("Source", value="QR")
                 consent = st.checkbox("Consentement RGPD", value=True)
 
+            # Auto-save (once per new content if email provided)
             is_new = (data != st.session_state.qr_last)
             if auto_save and is_new and email:
                 _save_lead(first, last, email, phone, company, job, source, consent)
@@ -208,10 +216,13 @@ with tab_export:
     rows = storage.list_leads()
 
     if rows:
+        # Aperçu tableau
         st.dataframe(rows, use_container_width=True, hide_index=True)
+
         st.markdown("### Gestion par ligne")
         st.caption("Supprimez une ligne précise via le bouton 🗑️.")
 
+        # Suppression par ligne (bouton)
         for r in rows:
             with st.container():
                 c1, c2, c3, c4 = st.columns([4,3,3,1])
@@ -222,14 +233,15 @@ with tab_export:
                 with c3:
                     st.write(r.get('company',''))
                 with c4:
-                    if st.button("🗑️", key=f"del_{r['id']}", help="Supprimer ce lead"):
+                    if st.button("🗑️", key=f\"del_{r['id']}\", help=\"Supprimer ce lead\"):
                         try:
                             storage.delete_lead(int(r["id"]))
-                            st.success(f"Lead #{r['id']} supprimé.")
+                            st.success(f\"Lead #{r['id']} supprimé.\")
                             st.rerun()
                         except Exception as e:
-                            st.warning(f"Suppression impossible: {e}")
+                            st.warning(f\"Suppression impossible: {e}\")
 
+        # Export CSV
         csv_bytes = storage.export_csv_bytes()
         st.download_button(
             "Télécharger en CSV",
