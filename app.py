@@ -1,16 +1,26 @@
 
 import os
+import tempfile
 import streamlit as st
 
 # --- Persistence (SQLite) ---
 from modules import storage
-DB_PATH = storage.init_db()  # creates/opens data/leads.db by default
 
 st.set_page_config(page_title="RevisIA – Leads", page_icon="🗂️", layout="wide")
 
+# Try default "data/leads.db", then fall back to /tmp if read-only or not writable
+FALLBACK_MSG = ""
+try:
+    DB_PATH = storage.init_db()  # default: data/leads.db
+except Exception as e:
+    tmp_dir = os.path.join(tempfile.gettempdir(), "revisia_data")
+    os.makedirs(tmp_dir, exist_ok=True)
+    fallback = os.path.join(tmp_dir, "leads.db")
+    DB_PATH = storage.init_db(fallback)
+    FALLBACK_MSG = f"Stockage déplacé vers {DB_PATH} (cause: {e}). Vous pouvez aussi définir LEADS_DB_PATH."
+
 # ------ Helpers ------
 def _save_lead(first_name, last_name, email, phone, company, job, source, consent):
-    """Persist lead in SQLite and return dict (no in-memory dependency)."""
     storage.upsert_lead(first_name, last_name, email, phone, company, job, source, consent)
     return {
         "first_name": first_name or "",
@@ -24,7 +34,6 @@ def _save_lead(first_name, last_name, email, phone, company, job, source, consen
     }
 
 def decode_qr_from_bytes(b: bytes):
-    """Delegate to your existing modules.qr if available; otherwise no-op."""
     try:
         from modules.qr import decode_qr_from_bytes as _real_decode
         return _real_decode(b)
@@ -32,7 +41,6 @@ def decode_qr_from_bytes(b: bytes):
         return None
 
 def parse_contact_from_qr(data: str) -> dict:
-    """Basic parser for vCard/MeCard fallback. Tries to extract common fields."""
     if not data:
         return {}
     d = {"first_name":"", "last_name":"", "email":"", "phone":"", "company":"", "job":""}
@@ -44,7 +52,6 @@ def parse_contact_from_qr(data: str) -> dict:
         for ln in lines:
             up = ln.upper()
             if up.startswith("N:"):
-                # N:Last;First;...
                 try:
                     body = ln.split(":",1)[1]
                     parts = body.split(";")
@@ -88,7 +95,6 @@ def parse_contact_from_qr(data: str) -> dict:
                 k = k.strip().upper()
                 v = v.strip()
                 if k == "N":
-                    # Last,First
                     parts = [p.strip() for p in v.split(",")]
                     if len(parts) >= 2:
                         d["last_name"], d["first_name"] = parts[0], parts[1]
@@ -121,6 +127,8 @@ with st.sidebar:
     st.markdown("### Base de données")
     st.caption(f"Chemin DB : `{DB_PATH}`")
     st.caption("Variable d'env optionnelle : `LEADS_DB_PATH`")
+    if FALLBACK_MSG:
+        st.warning(FALLBACK_MSG)
 
 st.title("Gestion des leads (scanner & export)")
 
@@ -157,7 +165,6 @@ with tab_scan:
                 source  = st.text_input("Source", value="QR")
                 consent = st.checkbox("Consentement RGPD", value=True)
 
-            # Auto-save (only once per new content)
             is_new = (data != st.session_state.qr_last)
             if auto_save and is_new and email:
                 _save_lead(first, last, email, phone, company, job, source, consent)
@@ -168,7 +175,6 @@ with tab_scan:
                 _save_lead(first, last, email, phone, company, job, source, consent)
                 st.session_state.qr_last = data
                 st.success("Lead enregistré.")
-
         else:
             st.error("Impossible de décoder un QR dans cette image.")
 
@@ -202,13 +208,10 @@ with tab_export:
     rows = storage.list_leads()
 
     if rows:
-        # Aperçu tableau rapide
         st.dataframe(rows, use_container_width=True, hide_index=True)
-
         st.markdown("### Gestion par ligne")
         st.caption("Supprimez une ligne précise via le bouton 🗑️.")
 
-        # Per-line deletion UI
         for r in rows:
             with st.container():
                 c1, c2, c3, c4 = st.columns([4,3,3,1])
@@ -227,7 +230,6 @@ with tab_export:
                         except Exception as e:
                             st.warning(f"Suppression impossible: {e}")
 
-        # Export CSV
         csv_bytes = storage.export_csv_bytes()
         st.download_button(
             "Télécharger en CSV",
