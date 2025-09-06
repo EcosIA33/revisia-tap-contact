@@ -148,7 +148,6 @@ def _lead_form(initial: Optional[Dict[str,str]] = None, key: str = "lead_form"):
 
 def tab_scan():
     st.subheader("Scanner un QR (image)")
-    st.caption("🎯 La capture **vidéo** a été retirée. Importez une photo du QR (PNG/JPG).")
     img = st.file_uploader("Photo du QR", type=["png","jpg","jpeg"], key="qr_upload")
     if img is not None:
         data = decode_qr_from_bytes(img.read())
