@@ -115,7 +115,7 @@ def build_header():
             qr_bytes = load_image_bytes(QR_IMAGE_PATH)
         if SHOW_QR_IN_HEADER and qr_bytes:
             try:
-                st.image(qr_bytes, width=300, caption="Scannez le QR pour récupérer ma carte")
+                st.image(qr_bytes, width=300, caption=" ")
             except Exception:
                 st.warning("Image QR en-tête invalide. Remplacez `assets/qr.png` ou renseignez QR_TARGET_URL dans .env.")
 
