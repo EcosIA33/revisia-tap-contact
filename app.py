@@ -35,7 +35,6 @@ IDENTITY: Dict[str,str] = {
     "FN": os.getenv("FN", "Adrian Rodriguez"),
     "N_LAST": os.getenv("N_LAST", "Rodriguez"),
     "N_FIRST": os.getenv("N_FIRST", "Adrian"),
-    "ORG": os.getenv("ORG", "DRIVN"),
     "TITLE": os.getenv("TITLE", "Fondateur"),
     "TEL": os.getenv("TEL", "+33 6 27 16 52 05"),
     "EMAIL": os.getenv("EMAIL", "adrian@drivn.fr"),
