@@ -25,7 +25,7 @@ except Exception as e:
 
 # ------ Helpers ------
 def _save_lead(first_name, last_name, email, phone, company, job, source, consent):
-    \"\"\"Persist lead in SQLite and return a normalized dict.\"\"\"
+    """Persist lead in SQLite and return a normalized dict."""
     storage.upsert_lead(first_name, last_name, email, phone, company, job, source, consent)
     return {
         "first_name": (first_name or "").strip(),
@@ -39,7 +39,7 @@ def _save_lead(first_name, last_name, email, phone, company, job, source, consen
     }
 
 def decode_qr_from_bytes(b: bytes):
-    \"\"\"Delegates to modules.qr if available; otherwise returns None.\"\"\"
+    """Delegates to modules.qr if available; otherwise returns None."""
     try:
         from modules.qr import decode_qr_from_bytes as _real_decode
         return _real_decode(b)
@@ -47,7 +47,7 @@ def decode_qr_from_bytes(b: bytes):
         return None
 
 def parse_contact_from_qr(data: str) -> dict:
-    \"\"\"Lightweight vCard/MeCard parser + heuristics for email/phone.\"\"\"
+    """Lightweight vCard/MeCard parser + heuristics for email/phone."""
     if not data:
         return {}
     d = {"first_name":"", "last_name":"", "email":"", "phone":"", "company":"", "job":""}
@@ -55,7 +55,7 @@ def parse_contact_from_qr(data: str) -> dict:
 
     # vCard rough parse
     if "BEGIN:VCARD" in s.upper():
-        lines = [ln.strip() for ln in s.replace("\\r","").split("\\n")]
+        lines = [ln.strip() for ln in s.replace("\r","").split("\n")]
         for ln in lines:
             up = ln.upper()
             if up.startswith("N:"):
@@ -121,10 +121,10 @@ def parse_contact_from_qr(data: str) -> dict:
 
     # Fallback: heuristics
     import re
-    m = re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", s)
+    m = re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", s)
     if m:
         d["email"] = m.group(0)
-    m = re.search(r"\\+?\\d[\\d\\s().-]{6,}", s)
+    m = re.search(r"\+?\d[\d\s().-]{6,}", s)
     if m:
         d["phone"] = m.group(0).strip()
     return d
@@ -208,7 +208,7 @@ with tab_export:
             if submitted:
                 try:
                     _save_lead(first, last, email, phone, company, job, source, consent)
-                    st.success("Lead enregistré de façon persistante (SQLite).")
+                    st.success("Lead enregistré de façon persistante (SQLite)." )
                 except Exception as e:
                     st.error(f"Enregistrement impossible: {e}")
 
@@ -233,13 +233,13 @@ with tab_export:
                 with c3:
                     st.write(r.get('company',''))
                 with c4:
-                    if st.button("🗑️", key=f\"del_{r['id']}\", help=\"Supprimer ce lead\"):
+                    if st.button("🗑️", key=f"del_{r['id']}", help="Supprimer ce lead"):
                         try:
                             storage.delete_lead(int(r["id"]))
-                            st.success(f\"Lead #{r['id']} supprimé.\")
+                            st.success(f"Lead #{r['id']} supprimé.")
                             st.rerun()
                         except Exception as e:
-                            st.warning(f\"Suppression impossible: {e}\")
+                            st.warning(f"Suppression impossible: {e}")
 
         # Export CSV
         csv_bytes = storage.export_csv_bytes()
