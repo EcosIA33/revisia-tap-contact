@@ -74,8 +74,6 @@ def build_header():
                 st.image(LOGO_PATH, width=160)
             except Exception:
                 st.warning("Logo non lisible (format invalide). Désactivez SHOW_LOGO ou remplacez le fichier.")
-        st.markdown(f"### {IDENTITY['FN']}")
-        st.caption(f"{IDENTITY['TITLE']} — {IDENTITY['ORG']}")
 
         # vCard téléchargeable (optionnel)
         photo_bytes = load_image_bytes(PHOTO_PATH)
