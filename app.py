@@ -169,21 +169,19 @@ with tab_share:
             else:
                 st.error(f"Erreur: {msg}")
 
+
 with tab_scan:
     st.header("Scanner un QR visiteur")
-    st.caption("La caméra arrière est utilisée par défaut. Si besoin, changez de caméra dans le menu du navigateur.")
+    st.caption("Choisissez la caméra **Arrière**. Si besoin, utilisez le *Mode photo (recommandé)* en dessous.")
+
     if not QR_ENABLED:
         st.warning("Scanner live indisponible : installez 'streamlit-webrtc', 'opencv-python(-headless)', 'av', 'aiortc', 'numpy'.")
     else:
         import cv2  # type: ignore
-        from streamlit_webrtc import webrtc_streamer, WebRtcMode, VideoTransformerBase, RTCConfiguration
+        from streamlit_webrtc import webrtc_streamer, WebRtcMode, VideoTransformerBase
 
         class QRProcessor(VideoTransformerBase):  # type: ignore[misc]
-        # -- UI: choix caméra --
-        # (Avant/Arrière) influence `facingMode`
-
             def __init__(self) -> None:
-                self.detector = cv2.QRCodeDetector()
                 self.last_result: Optional[str] = None
             def transform(self, frame):
                 img = frame.to_ndarray(format="bgr24")
@@ -196,28 +194,27 @@ with tab_scan:
                     pass
                 return img
 
-        cam_side = st.radio("Caméra utilisée", ["Arrière (recommandée)", "Avant"], horizontal=True)
-facing = "environment" if cam_side.startswith("Arrière") else "user"
-ctx = webrtc_streamer(
-    key="qr-scan",
-    mode=WebRtcMode.SENDRECV,
-    rtc_configuration=RTC_CONFIGURATION,
-    media_stream_constraints={
-        "video": {"facingMode": {"ideal": facing}, "width": {"ideal": 1280}, "height": {"ideal": 720}},
-        "audio": False
-    },
-    video_transformer_factory=QRProcessor,
-    async_processing=True,
-)
+        cam_side = st.radio("Caméra utilisée", ["Arrière (recommandée)", "Avant"], horizontal=True, index=0)
+        facing = "environment" if cam_side.startswith("Arrière") else "user"
 
-        
+        ctx = webrtc_streamer(
+            key="qr-scan",
+            mode=WebRtcMode.SENDRECV,
+            rtc_configuration=RTC_CONFIGURATION,
+            media_stream_constraints={
+                "video": {"facingMode": {"ideal": facing}, "width": {"ideal": 1280}, "height": {"ideal": 720}},
+                "audio": False
+            },
+            video_transformer_factory=QRProcessor,
+            async_processing=True,
+        )
+
         if "qr_last" not in st.session_state:
-            st.session_state.qr_last = None
+            st.session_state["qr_last"] = None
         auto_save = st.checkbox("Auto-enregistrer dès qu'un QR valide est détecté", value=False)
 
         qr_text = ctx.video_transformer.last_result if ctx and ctx.video_transformer else None
         if qr_text:
-            # Afficher le brut pour debug
             with st.expander("Voir le contenu brut du QR détecté"):
                 st.code(qr_text, language="text")
 
@@ -225,12 +222,10 @@ ctx = webrtc_streamer(
             parsed = parse_contact_from_qr(qr_text)
             st.write("Champs reconnus :", parsed)
 
-            # Prévient les doublons
-            is_new = (qr_text != st.session_state.qr_last)
+            is_new = (qr_text != st.session_state["qr_last"])
             if is_new:
-                st.session_state.qr_last = qr_text
+                st.session_state["qr_last"] = qr_text
 
-            # Formulaire + enregistrement
             with st.form("scan_to_lead", clear_on_submit=False):
                 c1, c2 = st.columns(2)
                 with c1:
@@ -266,9 +261,7 @@ ctx = webrtc_streamer(
             if s_submit:
                 _save_lead(s_first, s_last, s_email, s_phone, s_company, s_job, s_interest, s_consent)
 
-            # Auto-enregistrement si demandé et nouveau QR
             if auto_save and is_new:
-                # Utilise les valeurs parsées telles quelles; si incomplètes, on ne sauve pas
                 if parsed.get("first_name") and parsed.get("last_name") and parsed.get("email") and parsed.get("company"):
                     _save_lead(parsed["first_name"], parsed["last_name"], parsed["email"],
                                parsed.get("phone",""), parsed["company"], parsed.get("job",""),
@@ -276,8 +269,7 @@ ctx = webrtc_streamer(
                 else:
                     st.info("QR détecté, mais informations incomplètes pour un auto-enregistrement. Complétez puis cliquez sur Enregistrer.")
         else:
-            st.info("Aucun QR détecté pour l'instant. Approchez un QR net et bien éclairé à ~15-25 cm.")
-    st.subheader("Ou importer une image de QR")
+            st.info("Aucun QR détecté pour l'instant. Approchez un QR net et bien éclairé à ~15–25 cm.")
 
     st.subheader("Mode photo (recommandé)")
     st.caption("Utilisez l'appareil photo pour capturer une image nette du QR (très fiable).")
@@ -321,10 +313,8 @@ ctx = webrtc_streamer(
                         st.success("✅ Lead enregistré depuis photo.")
                     else:
                         st.error(f"Erreur: {msg}")
-        else:
-            st.error("Impossible de lire un QR dans cette photo. Reprenez avec plus de lumière et sans reflet.")
 
-
+    st.subheader("Ou importer une image de QR")
     img = st.file_uploader("Photo du QR (PNG/JPG)", type=["png","jpg","jpeg"])
     if img is not None:
         from modules.qr import decode_qr_from_bytes
