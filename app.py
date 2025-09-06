@@ -53,9 +53,6 @@ QR_TARGET_URL = os.getenv("QR_TARGET_URL", "")  # si défini + 'qrcode' présent
 SHOW_DOWNLOAD_BUTTON = os.getenv("SHOW_DOWNLOAD_BUTTON", "false").lower() in ("1","true","yes","on")
 LOGO_PATH = os.getenv("LOGO_PATH", "assets/logo.png")
 SHOW_LOGO = os.getenv("SHOW_LOGO", "true").lower() in ("1","true","yes","on")
-# NEW: allow hiding identity/contacts while keeping logo
-SHOW_NAME_INFO = os.getenv("SHOW_NAME_INFO", "true").lower() in ("1","true","yes","on")
-SHOW_CONTACT_LINE = os.getenv("SHOW_CONTACT_LINE", "true").lower() in ("1","true","yes","on")
 
 # --- Storage ---
 storage = Storage(StorageConfig(csv_path=LEADS_CSV))
@@ -70,9 +67,58 @@ def load_image_bytes(path: str) -> Optional[bytes]:
         return None
 
 def build_header():
-    """Removed per client request: no header rendered (logo/name/contacts/QR/vCard)."""
-    return
+    col1, col2 = st.columns([1,1])
+    with col1:
+        if SHOW_LOGO and os.path.exists(LOGO_PATH):
+            try:
+                st.image(LOGO_PATH, width=160)
+            except Exception:
+                st.warning("Logo non lisible (format invalide). Désactivez SHOW_LOGO ou remplacez le fichier.")
+        st.markdown(f"### {IDENTITY['FN']}")
+        st.caption(f"{IDENTITY['TITLE']} — {IDENTITY['ORG']}")
+        st.write(f"📧 {IDENTITY['EMAIL']} • 📞 {IDENTITY['TEL']}")
 
+        # vCard téléchargeable (optionnel)
+        photo_bytes = load_image_bytes(PHOTO_PATH)
+        vcard_bytes = build_vcard_bytes(
+            fn=IDENTITY["FN"],
+            n_last=IDENTITY["N_LAST"],
+            n_first=IDENTITY["N_FIRST"],
+            org=IDENTITY["ORG"],
+            title=IDENTITY["TITLE"],
+            tel=IDENTITY["TEL"],
+            email=IDENTITY["EMAIL"],
+            url=IDENTITY["URL"],
+            adr_street=IDENTITY["ADR_STREET"],
+            adr_city=IDENTITY["ADR_CITY"],
+            adr_pc=IDENTITY["ADR_PC"],
+            adr_country=IDENTITY["ADR_COUNTRY"],
+            photo_bytes=photo_bytes
+        )
+        if SHOW_DOWNLOAD_BUTTON:
+            st.download_button("📇 Sauvegarder le contact (.vcf)", data=vcard_bytes,
+                               file_name=f"{IDENTITY['FN'].replace(' ', '_')}.vcf",
+                               mime="text/vcard")
+    with col2:
+        qr_bytes: Optional[bytes] = None
+        # Si demandé, tente de générer un QR à la volée
+        if QR_TARGET_URL:
+            try:
+                import qrcode
+                qr = qrcode.QRCode(version=4, box_size=6, border=2)
+                qr.add_data(QR_TARGET_URL)
+                qr.make(fit=True)
+                img = qr.make_image(fill_color="black", back_color="white")
+                buf = io.BytesIO(); img.save(buf, format="PNG"); qr_bytes = buf.getvalue()
+            except Exception:
+                qr_bytes = load_image_bytes(QR_IMAGE_PATH)
+        else:
+            qr_bytes = load_image_bytes(QR_IMAGE_PATH)
+        if SHOW_QR_IN_HEADER and qr_bytes:
+            try:
+                st.image(qr_bytes, width=300, caption="Scannez le QR pour récupérer ma carte")
+            except Exception:
+                st.warning("Image QR en-tête invalide. Remplacez `assets/qr.png` ou renseignez QR_TARGET_URL dans .env.")
 
 def _lead_form(initial: Optional[Dict[str,str]] = None, key: str = "lead_form"):
     initial = initial or {}
