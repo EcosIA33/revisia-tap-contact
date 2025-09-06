@@ -2,9 +2,9 @@
 """
 Persistent storage for leads using SQLite (stdlib only).
 
-- Database file: data/leads.db (override with env LEADS_DB_PATH)
-- Provides: init_db, upsert_lead, list_leads, delete_lead, export_csv_bytes/export_csv_to_path
-- Email is the unique key by default (idempotent saves).
+- Default DB file: data/leads.db (override with env LEADS_DB_PATH)
+- Safe import multiple times.
+- API: init_db(path=None), upsert_lead(...), list_leads(), delete_lead(id), export_csv_bytes()
 """
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ def _now_iso() -> str:
 
 def upsert_lead(first_name: str, last_name: str, email: str, phone: str,
                 company: str, job: str, source: str, consent: bool) -> None:
-    """Insert or update a lead by unique email."""
+    """Insert or update a lead by unique email (idempotent writes)."""
     if not email:
         raise ValueError("email is required for persistence (unique key)")
     now = _now_iso()
@@ -74,7 +74,7 @@ def upsert_lead(first_name: str, last_name: str, email: str, phone: str,
               consent=excluded.consent,
               updated_at=excluded.updated_at
             """,
-            (first_name or "", last_name or "", email.strip().lower(), phone or "",
+            (first_name or "", last_name or "", (email or "").strip().lower(), phone or "",
              company or "", job or "", source or "", int(bool(consent)), now, now)
         )
 
@@ -89,20 +89,6 @@ def list_leads(order: str = "updated_at DESC") -> list[dict]:
 def delete_lead(lead_id: int) -> None:
     with _LOCK, _CONN:
         _CONN.execute("DELETE FROM leads WHERE id=?", (int(lead_id),))
-
-
-def export_csv_to_path(path: str) -> str:
-    """Write current leads to CSV file at `path` and return the path."""
-    rows = list_leads()
-    folder = os.path.dirname(path) or "."
-    os.makedirs(folder, exist_ok=True)
-    headers = ["id","first_name","last_name","email","phone","company","job","source","consent","created_at","updated_at"]
-    with open(path, "w", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=headers)
-        w.writeheader()
-        for r in rows:
-            w.writerow({k: r.get(k, "") for k in headers})
-    return path
 
 
 def export_csv_bytes() -> bytes:
