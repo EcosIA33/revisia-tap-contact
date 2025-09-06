@@ -76,7 +76,6 @@ def build_header():
                 st.warning("Logo non lisible (format invalide). Désactivez SHOW_LOGO ou remplacez le fichier.")
         st.markdown(f"### {IDENTITY['FN']}")
         st.caption(f"{IDENTITY['TITLE']} — {IDENTITY['ORG']}")
-        st.write(f"📧 {IDENTITY['EMAIL']} • 📞 {IDENTITY['TEL']}")
 
         # vCard téléchargeable (optionnel)
         photo_bytes = load_image_bytes(PHOTO_PATH)
@@ -120,20 +119,18 @@ def build_header():
             except Exception:
                 st.warning("Image QR en-tête invalide. Remplacez `assets/qr.png` ou renseignez QR_TARGET_URL dans .env.")
 
+
 def _lead_form(initial: Optional[Dict[str,str]] = None, key: str = "lead_form"):
     initial = initial or {}
     with st.form(key=key):
-        c1, c2 = st.columns(2)
-        with c1:
-            first_name = st.text_input("Prénom", value=initial.get("first_name",""))
-            email = st.text_input("Email", value=initial.get("email",""))
-            company = st.text_input("Société", value=initial.get("company",""))
-            interest = st.text_input("Intérêt", value=initial.get("interest","Prise de contact"))
-        with c2:
-            last_name = st.text_input("Nom", value=initial.get("last_name",""))
-            phone = st.text_input("Téléphone", value=initial.get("phone",""))
-            job = st.text_input("Fonction", value=initial.get("job",""))
-            utm = st.text_input("UTM/Source", value=initial.get("utm_source",""))
+        # Saisie manuelle rapide — ordre demandé : Société, Nom, Prénom, Téléphone, Email, Fonction, Intérêt
+        company = st.text_input("Société", value=initial.get("company",""))
+        last_name = st.text_input("Nom", value=initial.get("last_name",""))
+        first_name = st.text_input("Prénom", value=initial.get("first_name",""))
+        phone = st.text_input("Téléphone", value=initial.get("phone",""))
+        email = st.text_input("Email", value=initial.get("email",""))
+        job = st.text_input("Fonction", value=initial.get("job",""))
+        interest = st.text_input("Intérêt", value=initial.get("interest","Prise de contact"))
         submitted = st.form_submit_button("💾 Enregistrer le lead")
     if submitted:
         if not (first_name and last_name and email and company):
@@ -142,7 +139,7 @@ def _lead_form(initial: Optional[Dict[str,str]] = None, key: str = "lead_form"):
             ok, msg = storage.append_lead(Lead(
                 first_name=first_name, last_name=last_name, email=email,
                 phone=phone, company=company, job=job,
-                interest=interest, utm_source=utm, ip_hash=""
+                interest=interest, utm_source="", ip_hash=""
             ))
             if ok:
                 st.success("Lead enregistré.")
